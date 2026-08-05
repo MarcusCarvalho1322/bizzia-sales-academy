@@ -1,0 +1,202 @@
+{
+  "name": "BIZZIA Sales Academy - AI Evaluation",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "sales-academy/evaluate",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "webhook-receive",
+      "name": "Webhook - Receber Resposta",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "webhookId": "sales-academy-eval"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extrair dados do payload\nconst body = JSON.parse($input.first().json.body);\n\nconst { question_id, student_response, question_text, scenario_context, competency, level, rubric } = body;\n\n// Montar system prompt baseado no nível\nconst levelContexts = {\n  1: 'NÍVEL 1 - FUNDAMENTOS (R$ 3-8k). Avalie como recepcionista iniciante. Tolere alguma insegurança técnica, mas NÃO tolere desrespeito ou pressão.',\n  2: 'NÍVEL 2 - HIGH TICKET (R$ 10-25k). Avalie como consultora experiente. Espere domínio de descoberta multinível e ancoragem de valor.',\n  3: 'NÍVEL 3 - PREMIUM (R$ 25-80k+). Avalie postura peer-to-peer com CEOs e celebridades. NÃO tolere intimidação ou servilismo.',\n  4: 'NÍVEL 4 - LTV (R$ 100-500k+). Avalie gestão de relacionamento vitalício. Espere pensamento de longo prazo e cálculo de LTV.'\n};\n\nconst systemPrompt = `Você é avaliador especialista em vendas consultivas de cirurgia plástica no Brasil.\n\n${levelContexts[level] || levelContexts[1]}\n\nRubrica específica: ${rubric || 'Avalie rapport, descoberta, apresentação, objeções e fechamento.'}\n\nRESPONDA EXCLUSIVAMENTE em JSON válido, sem texto adicional:\n{\n  \"score\": <0-10>,\n  \"competency_scores\": {\"principal\": <0-10>, \"secundaria\": <0-10>},\n  \"feedback\": \"<2-3 frases construtivas>\",\n  \"what_was_good\": \"<ponto positivo>\",\n  \"what_to_improve\": \"<melhoria sugerida>\",\n  \"ideal_response\": \"<resposta modelo>\"\n}`;\n\nconst userMessage = `CENÁRIO: ${scenario_context}\\n\\nPERGUNTA: ${question_text}\\n\\nRESPOSTA DO ALUNO:\\n\"${student_response}\"\\n\\nCOMPETÊNCIA AVALIADA: ${competency}\\n\\nAvalie em JSON.`;\n\nreturn [{\n  json: {\n    question_id,\n    systemPrompt,\n    userMessage,\n    student_response,\n    competency,\n    level\n  }\n}];"
+      },
+      "id": "prepare-prompt",
+      "name": "Preparar Prompt",
+      "type": "n8n-nodes-base.code",
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $credentials.httpHeaderAuth.value }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-sonnet-4-20250514\",\n  \"max_tokens\": 1000,\n  \"temperature\": 0.3,\n  \"system\": {{ JSON.stringify($json.systemPrompt) }},\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": {{ JSON.stringify($json.userMessage) }}\n    }\n  ]\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "claude-api",
+      "name": "Claude API - Avaliar",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [690, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURE_YOUR_ANTHROPIC_KEY",
+          "name": "Anthropic API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst prevData = $('Preparar Prompt').first().json;\n\ntry {\n  // Extrair texto da resposta do Claude\n  const content = input.content?.[0]?.text || '';\n  \n  // Limpar possíveis markdown fences\n  const cleaned = content.replace(/```json|```/g, '').trim();\n  const evaluation = JSON.parse(cleaned);\n  \n  return [{\n    json: {\n      success: true,\n      question_id: prevData.question_id,\n      competency: prevData.competency,\n      level: prevData.level,\n      student_response: prevData.student_response,\n      evaluation: {\n        score: Math.min(10, Math.max(0, evaluation.score)),\n        competency_scores: evaluation.competency_scores || {},\n        feedback: evaluation.feedback || 'Avaliação concluída.',\n        what_was_good: evaluation.what_was_good || '',\n        what_to_improve: evaluation.what_to_improve || '',\n        ideal_response: evaluation.ideal_response || ''\n      },\n      model_used: 'claude-sonnet-4-20250514',\n      evaluated_at: new Date().toISOString()\n    }\n  }];\n} catch (error) {\n  return [{\n    json: {\n      success: false,\n      question_id: prevData.question_id,\n      error: 'Falha ao processar avaliação: ' + error.message,\n      raw_response: input.content?.[0]?.text || 'sem resposta'\n    }\n  }];\n}"
+      },
+      "id": "parse-response",
+      "name": "Processar Avaliação",
+      "type": "n8n-nodes-base.code",
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO ai_evaluations (answer_id, model_used, raw_response, created_at) VALUES ('{{ $json.question_id }}', '{{ $json.model_used }}', '{{ JSON.stringify($json.evaluation) }}', NOW()) RETURNING id;",
+        "options": {}
+      },
+      "id": "save-neon",
+      "name": "Salvar no Neon",
+      "type": "n8n-nodes-base.postgres",
+      "position": [1130, 300],
+      "credentials": {
+        "postgres": {
+          "id": "CONFIGURE_YOUR_NEON_CREDENTIALS",
+          "name": "Neon - Sales Academy"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              { "name": "Access-Control-Allow-Origin", "value": "*" },
+              { "name": "Content-Type", "value": "application/json" }
+            ]
+          }
+        }
+      },
+      "id": "respond-webhook",
+      "name": "Responder ao Frontend",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [1350, 300]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "sales-academy/generate-scenario",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-generate",
+      "name": "Webhook - Gerar Cenário",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 550],
+      "webhookId": "sales-academy-gen"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = JSON.parse($input.first().json.body);\nconst { level, competency, procedure } = body;\n\nconst systemPrompt = `Você é especialista em criação de cenários de treinamento para vendas em clínicas de cirurgia plástica premium no Brasil.\n\nGere EXATAMENTE em JSON válido sem texto adicional:\n{\n  \"patient_name\": \"nome brasileiro\",\n  \"patient_age\": numero,\n  \"patient_profession\": \"profissão\",\n  \"scenario\": \"contexto em 3 frases\",\n  \"patient_says\": \"fala da paciente\",\n  \"question\": \"pergunta avaliativa\",\n  \"options\": [\n    {\"text\": \"opcao A\", \"score\": 0-10, \"feedback\": \"explicacao\"},\n    {\"text\": \"opcao B\", \"score\": 0-10, \"feedback\": \"explicacao\"},\n    {\"text\": \"opcao C\", \"score\": 0-10, \"feedback\": \"explicacao\"}\n  ],\n  \"competency\": \"${competency}\",\n  \"ideal_response\": \"resposta modelo\"\n}\n\nREGRAS: cenários AMBÍGUOS, duas opções parecem boas, linguagem brasileira real, variar perfis.`;\n\nconst userMessage = `Gere cenário nível ${level}, competência ${competency}, procedimento ${procedure || 'variado'}.`;\n\nreturn [{ json: { systemPrompt, userMessage, level, competency, procedure } }];"
+      },
+      "id": "prepare-gen",
+      "name": "Preparar Geração",
+      "type": "n8n-nodes-base.code",
+      "position": [470, 550]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $credentials.httpHeaderAuth.value }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-sonnet-4-20250514\",\n  \"max_tokens\": 1500,\n  \"temperature\": 0.7,\n  \"system\": {{ JSON.stringify($json.systemPrompt) }},\n  \"messages\": [{ \"role\": \"user\", \"content\": {{ JSON.stringify($json.userMessage) }} }]\n}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "claude-gen",
+      "name": "Claude API - Gerar",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [690, 550],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURE_YOUR_ANTHROPIC_KEY",
+          "name": "Anthropic API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\ntry {\n  const text = input.content?.[0]?.text || '';\n  const cleaned = text.replace(/```json|```/g, '').trim();\n  const scenario = JSON.parse(cleaned);\n  return [{ json: { success: true, scenario, generated_at: new Date().toISOString() } }];\n} catch (e) {\n  return [{ json: { success: false, error: e.message } }];\n}"
+      },
+      "id": "parse-gen",
+      "name": "Processar Cenário",
+      "type": "n8n-nodes-base.code",
+      "position": [910, 550]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              { "name": "Access-Control-Allow-Origin", "value": "*" },
+              { "name": "Content-Type", "value": "application/json" }
+            ]
+          }
+        }
+      },
+      "id": "respond-gen",
+      "name": "Responder Cenário",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [1130, 550]
+    }
+  ],
+  "connections": {
+    "Webhook - Receber Resposta": { "main": [[{ "node": "Preparar Prompt", "type": "main", "index": 0 }]] },
+    "Preparar Prompt": { "main": [[{ "node": "Claude API - Avaliar", "type": "main", "index": 0 }]] },
+    "Claude API - Avaliar": { "main": [[{ "node": "Processar Avaliação", "type": "main", "index": 0 }]] },
+    "Processar Avaliação": { "main": [[{ "node": "Salvar no Neon", "type": "main", "index": 0 }]] },
+    "Salvar no Neon": { "main": [[{ "node": "Responder ao Frontend", "type": "main", "index": 0 }]] },
+    "Webhook - Gerar Cenário": { "main": [[{ "node": "Preparar Geração", "type": "main", "index": 0 }]] },
+    "Preparar Geração": { "main": [[{ "node": "Claude API - Gerar", "type": "main", "index": 0 }]] },
+    "Claude API - Gerar": { "main": [[{ "node": "Processar Cenário", "type": "main", "index": 0 }]] },
+    "Processar Cenário": { "main": [[{ "node": "Responder Cenário", "type": "main", "index": 0 }]] }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  }
+}

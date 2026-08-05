@@ -1,0 +1,185 @@
+// =============================================================
+// BIZZ.IA SALES ACADEMY — schema de dados
+//
+// ESTADO: schema de referencia. O banco Neon ainda NAO foi
+// provisionado (ver docs/DOSSIE-MESTRE.md §10). Enquanto isso, a
+// aplicacao persiste localmente no navegador.
+//
+// Para ativar:
+//   1. criar o projeto no Neon e copiar a connection string
+//   2. cadastrar DATABASE_URL no Vercel
+//   3. npx prisma migrate deploy
+//   4. aplicar as policies de Row Level Security de
+//      docs/schema-neon.sql (multi-tenancy por orgId)
+//
+// Requisitos de conformidade endereçados aqui:
+//   §4.4 — Clinic.priceTable: a clinica configura a propria tabela
+//   §4.5 — TermsAcceptance: aceite obrigatorio com timestamp
+// =============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  STUDENT
+  MANAGER
+  ADMIN
+}
+
+enum Plan {
+  ESSENCIAL
+  PRO
+}
+
+// ── Multi-tenancy ────────────────────────────────────────────
+
+model Clinic {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  plan      Plan     @default(ESSENCIAL)
+
+  // §4.4 — Tabela de precos propria da clinica.
+  // Enquanto estiver nula, a interface exibe apenas faixas
+  // rotuladas como "valor ilustrativo para fins de treinamento".
+  // Formato esperado:
+  //   [{ "procedure": "Rinoplastia", "min": 0, "max": 0, "currency": "BRL" }]
+  priceTable      Json?
+  priceTableSetAt DateTime?
+
+  // Retencao de transcricoes de simulacao, em meses (§4.5).
+  // Recomendacao do dossie: 12. Valor final depende do parecer juridico.
+  transcriptRetentionMonths Int @default(12)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users     User[]
+  @@map("clinics")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         Role     @default(STUDENT)
+  plan         Plan     @default(ESSENCIAL)
+  active       Boolean  @default(true)
+
+  clinicId String
+  clinic   Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  lastLogin DateTime?
+
+  examResults       ExamResult[]
+  simulationResults SimulationResult[]
+  acceptances       TermsAcceptance[]
+  certificates      Certificate[]
+
+  @@index([clinicId])
+  @@map("users")
+}
+
+// ── §4.5 — Aceite de termos com timestamp ────────────────────
+
+enum DocumentKind {
+  PRIVACY_POLICY
+  TERMS_OF_USE
+}
+
+model TermsAcceptance {
+  id       String       @id @default(cuid())
+  userId   String
+  user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  document DocumentKind
+  version  String // ex.: "2026-08-05"
+
+  // O timestamp exigido pelo dossie. Nao editavel apos a gravacao.
+  acceptedAt DateTime @default(now())
+
+  // Evidencia minima do ato de aceite.
+  ipAddress String?
+  userAgent String?
+
+  @@unique([userId, document, version])
+  @@index([userId])
+  @@map("terms_acceptances")
+}
+
+// ── Resultados ───────────────────────────────────────────────
+
+model ExamResult {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  level        Int
+  score        Int
+  total        Int
+  percentage   Int
+  passed       Boolean
+  timeTakenSec Int
+  expired      Boolean @default(false)
+
+  // Alternativas escolhidas e desempenho por competencia.
+  answers      Json
+  competencies Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, level])
+  @@map("exam_results")
+}
+
+model SimulationResult {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  profileId   String
+  profileName String
+  procedure   String
+  level       Int
+  avgScore    Int
+  passed      Boolean
+
+  // Dado de desempenho profissional. Acesso restrito a aluna e
+  // a gestao da clinica. Sujeito a transcriptRetentionMonths.
+  transcript Json
+
+  createdAt DateTime  @default(now())
+  purgeAfter DateTime?
+
+  @@index([userId, level])
+  @@index([purgeAfter])
+  @@map("simulation_results")
+}
+
+// ── §6.5 — Certificado com numero de serie verificavel ───────
+
+model Certificate {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Exibido na pagina publica /verificar/[serial].
+  serial     String   @unique
+  level      Int
+  percentage Int
+  issuedAt   DateTime @default(now())
+  expiresAt  DateTime // validade de 24 meses, com recertificacao
+  revokedAt  DateTime?
+
+  @@index([userId])
+  @@map("certificates")
+}

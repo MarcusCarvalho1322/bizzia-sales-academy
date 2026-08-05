@@ -1,15 +1,27 @@
 {
   "name": "bizzia-sales-academy",
-  "version": "3.0.0",
+  "version": "5.0.0",
   "private": true,
+  "description": "BIZZ.IA Sales Academy — plataforma de capacitacao em atendimento consultivo para clinicas de estetica e cirurgia plastica.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "lint": "next lint"
   },
   "dependencies": {
     "next": "14.2.35",
+    "next-auth": "^4.24.11",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "typescript": "^5.5.3"
+  },
+  "engines": {
+    "node": ">=18.17.0"
   }
 }
