@@ -7,7 +7,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "verificar-questoes": "node scripts/verificar-questoes.mjs",
+    "prebuild": "node scripts/verificar-questoes.mjs"
   },
   "dependencies": {
     "next": "14.2.35",

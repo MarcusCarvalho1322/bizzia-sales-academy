@@ -413,5 +413,112 @@ complementar do Nível 4, listadas em 2.2.
 
 ---
 
+## 11. Validade do exame — correção de 07/08/2026
+
+### 11.1 O defeito
+
+O operador relatou ter acertado 97% de um exame **sem ler os enunciados**,
+apenas marcando sempre a alternativa mais longa. A medição confirmou e
+agravou o relato:
+
+| Medição | Antes |
+|---|---|
+| "Marcar sempre a mais longa" acerta | **204 de 205 = 99,5%** |
+| Comprimento médio da alternativa correta | 202 caracteres |
+| Comprimento médio das alternativas erradas | 48 caracteres |
+| Razão | **4,26x** |
+
+Por nível: 100%, 100%, 100%, 98%. O exame não media competência — media
+quem percebeu o padrão. Qualquer certificação emitida com esse banco era
+tecnicamente inválida.
+
+Causa: as respostas corretas eram falas desenvolvidas da recepcionista;
+as erradas eram descartes de uma linha.
+
+### 11.2 O que foi alterado
+
+**615 distratores reescritos** — as três alternativas incorretas de cada
+uma das 205 questões. Cada uma passou a ser uma conduta plausível na
+superfície, desenvolvida no mesmo registro e comprimento da correta, e
+errada exatamente pelo motivo que o campo de feedback aponta.
+
+**Não foi tocado:** nenhum enunciado, nenhuma resposta correta, nenhum
+gabarito (exceto 11.4), nenhuma competência, nenhum feedback. A
+verificação de integridade roda a cada aplicação e aborta se algum desses
+campos mudar.
+
+Três passes de balanceamento:
+1. Reescrita dos 615 distratores.
+2. 85 distratores estendidos onde a correta ainda era a mais longa.
+3. 141 distratores convertidos em fala direta — ver 11.3.
+
+### 11.3 Segunda pista, encontrada pelo verificador
+
+Ao construir o verificador automático, apareceu um sinal que a inspeção
+manual não tinha visto: em 140 das 205 questões, **a alternativa correta
+era a única escrita entre aspas** (fala direta da recepcionista). Sozinho,
+esse sinal acertava **68,3%** — praticamente a nota de corte de 70%.
+
+Corrigido prefixando um distrator de cada questão afetada com a fala que
+aquela conduta errada produziria na prática.
+
+### 11.4 Erro de gabarito — questão 4.49
+
+Encontrado durante a revisão. **O gabarito apontava para uma conduta de
+sonegação fiscal.**
+
+- Pergunta: *"Qual é a abordagem correta quando paciente VIP solicita que
+  a clínica não emita nota fiscal por 'motivos pessoais'?"*
+- Marcada como correta (`c: 2`): *"Aceitar apenas para procedimentos
+  abaixo de determinado valor."*
+- O próprio feedback da questão diz: *"Omissão de nota fiscal é sonegação
+  — independentemente do valor do relacionamento."*
+
+O gabarito contradizia o feedback e orientava conduta ilícita. Corrigido
+para `c: 3` — a alternativa que explica a obrigatoriedade legal da
+emissão. Esta é a **única** alteração de gabarito em todo o banco.
+
+### 11.5 Resultado medido
+
+| Heurística de superfície | Antes | Depois | Acaso |
+|---|---|---|---|
+| Sempre a mais longa | **99,5%** | 14,1% | 25% |
+| Sempre a mais curta | 0,0% | 33,7% | 25% |
+| A única entre aspas | 68,3% | 13,2% | 25% |
+| A que tem mais vírgulas | — | 41,5% | 25% |
+| Sempre a primeira | — | 26,3% | 25% |
+| Sempre a última | — | 24,4% | 25% |
+| Razão de comprimento correta/erradas | 4,26x | **0,95x** | 1,00x |
+
+A melhor heurística disponível hoje entrega 41,5%. A menor nota de corte
+do produto é 70%. **Não há mais como passar sem ler.**
+
+### 11.6 Trava permanente
+
+Criado `scripts/verificar-questoes.mjs`, ligado ao `prebuild` no
+`package.json`. O build **falha** se qualquer heurística ultrapassar 45%,
+se a razão de comprimento sair da faixa 0,80x–1,25x, se o banco deixar de
+ter 205 questões, ou se houver alternativa duplicada, vazia ou curta
+demais.
+
+Rodar manualmente:
+
+```
+npm run verificar-questoes
+```
+
+O defeito não pode voltar sem quebrar o build.
+
+### 11.7 Pendência
+
+Os distratores foram escritos nesta sessão e **não passaram por revisão de
+especialista em atendimento de clínica**. Eles são plausíveis e
+tecnicamente errados pelo motivo certo, mas a calibragem fina de quão
+tentador cada um deve ser merece uma leitura de quem treina recepção na
+prática. Recomenda-se revisão amostral antes da primeira turma paga.
+
+
+---
+
 *Documento gerado durante a migração de 05/08/2026. Qualquer alteração
 posterior em conteúdo comercial ou de cenário deve atualizar este relatório.*
